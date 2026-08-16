@@ -16,8 +16,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gnucobol
 
-      - name: Report toolchain version
-        run: cobc --version
+      - name: Report toolchain versions
+        run: |
+          cobc --version
+          python3 --version
+
+      - name: Run the Python ELIGCALC over the golden input
+        run: |
+          mkdir -p build/pyelig
+          PYTHONPATH=src/python \
+          DD_CLAIMIN=data/golden/input/CLAIMANT.DAT \
+          DD_ELIGOUT=build/pyelig/ELIG.DAT \
+          DD_ELIGAUD=build/pyelig/ELIGCALC.AUD \
+            python3 -m mba100.eligcalc
+
+      - name: Assert byte-exact ELIGSTEP parity
+        run: |
+          cmp data/golden/expected/ELIG.DAT     build/pyelig/ELIG.DAT
+          cmp data/golden/expected/ELIGCALC.AUD build/pyelig/ELIGCALC.AUD
 
       - name: Run golden-file test suite
         run: ./tests/run_golden_tests.sh

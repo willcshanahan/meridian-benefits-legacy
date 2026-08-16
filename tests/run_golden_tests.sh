@@ -47,7 +47,7 @@ mkdir -p "$WORK" "$LOAD" "$EXPECT"
 banner
 echo "STEP COMPILE   - GnuCOBOL $(cobc --version | head -1 | awk '{print $3}')"
 banner
-for pgm in ELIGCALC BENEFITS PAYCALC REPTGEN; do
+for pgm in BENEFITS PAYCALC REPTGEN; do
   if cobc -x -Wall -I "$CPY" -o "$LOAD/$pgm" "$SRC/$pgm.CBL" 2>"$WORK/$pgm.cobc.log"; then
     echo "  COMPILE $pgm ... OK"
   else
@@ -94,12 +94,13 @@ compare() {
 }
 
 banner
-echo "STEP ELIGSTEP  - MBA100 ELIGCALC  eligibility determination"
+echo "STEP ELIGSTEP  - MBA100 ELIGCALC  eligibility determination (Python)"
 banner
+PYTHONPATH="$ROOT/src/python" \
 DD_CLAIMIN="$IN/CLAIMANT.DAT" \
 DD_ELIGOUT="$WORK/ELIG.DAT" \
 DD_ELIGAUD="$WORK/ELIGCALC.AUD" \
-  "$LOAD/ELIGCALC" || die "ELIGCALC returned RC=$?"
+  python3 -m mba100.eligcalc || die "ELIGCALC returned RC=$?"
 compare ELIG.DAT     "$WORK/ELIG.DAT"
 compare ELIGCALC.AUD "$WORK/ELIGCALC.AUD"
 
