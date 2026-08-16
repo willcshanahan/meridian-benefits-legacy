@@ -70,8 +70,37 @@ class FileAbend(Exception):
         self.ddname = ddname
 
 
-def _money(digits: str) -> Decimal:
+class DataAbend(Exception):
+    """Unusable display data on an input record.  RC 16."""
+
+    def __init__(self, field: str) -> None:
+        super().__init__(field)
+        self.field = field
+
+
+def _display_digits(field: str) -> str:
+    """Normalise a COBOL ``PIC 9`` display field to digits.
+
+    An all-blank display field read as zero under the COBOL runtime, so a
+    short or blank record reached ``2100-EDIT-CLAIM`` and was denied rather
+    than killing the run.  Data that is neither blank nor numeric never had
+    defined behaviour, so it abends instead of being guessed at.
+    """
+    if field.strip() == "":
+        return "0" * len(field)
+    if not field.isdigit():
+        raise DataAbend(field)
+    return field
+
+
+def _display_int(field: str) -> int:
+    """Read a COBOL ``PIC 9(n)`` display field as an integer."""
+    return int(_display_digits(field))
+
+
+def _money(field: str) -> Decimal:
     """Read a COBOL ``PIC 9(n)V99`` display field as an exact decimal."""
+    digits = _display_digits(field)
     return Decimal(digits[:-2] + "." + digits[-2:])
 
 
@@ -118,11 +147,11 @@ class ClaimantRecord:
             county_code=image[28:31],
             filing_date=image[31:39],
             monthly_income=_money(image[39:48]),
-            dependent_count=int(image[48:50]),
-            residency_months=int(image[50:53]),
+            dependent_count=_display_int(image[48:50]),
+            residency_months=_display_int(image[50:53]),
             disability_flag=image[53:54],
             prior_claim_flag=image[54:55],
-            elig_start_day=int(image[55:57]),
+            elig_start_day=_display_int(image[55:57]),
             status_code=image[57:59],
         )
 
@@ -207,7 +236,11 @@ class LineSequentialWriter:
             raise FileAbend(self.ddname) from exc
 
     def close(self) -> None:
-        self._stream.close()
+        # Writes are buffered, so a full volume usually only surfaces here.
+        try:
+            self._stream.close()
+        except OSError as exc:
+            raise FileAbend(self.ddname) from exc
 
 
 class EligibilityRun:
@@ -242,16 +275,23 @@ class EligibilityRun:
     # 0000-MAIN-CONTROL
     def main_control(self) -> None:
         self.housekeeping()
-        for image in self._claim_lines:
-            self.read_next_claim(image)
+        try:
+            for image in self._claim_file:
+                self.read_next_claim(image.rstrip("\n"))
+        except OSError as exc:
+            raise FileAbend("CLAIMIN ") from exc
         self.control_totals()
         self.end_of_job()
 
     # 1000-HOUSEKEEPING
     def housekeeping(self) -> None:
+        # newline="\n" keeps the record boundary at the line-sequential
+        # delimiter alone; the extract is read a record at a time as the
+        # sequential READ did, not held in storage.
         try:
-            with open(self._claim_path, "r", encoding="ascii") as claim_file:
-                self._claim_lines = claim_file.read().splitlines()
+            self._claim_file = open(
+                self._claim_path, "r", encoding="ascii", newline="\n"
+            )
         except OSError as exc:
             raise FileAbend("CLAIMIN ") from exc
         self._elig_file = LineSequentialWriter(self._elig_path, "ELIGOUT ")
@@ -440,6 +480,7 @@ class EligibilityRun:
 
     # 9000-END-OF-JOB
     def end_of_job(self) -> None:
+        self._claim_file.close()
         self._elig_file.close()
         self._audit_file.close()
 
@@ -459,6 +500,12 @@ def main() -> int:
         # 9500-FILE-ABEND
         print(
             f"MBA100 OPEN OR IO FAILURE ON {abend.ddname}",
+            file=sys.stderr,
+        )
+        return 16
+    except DataAbend as abend:
+        print(
+            f"MBA100 UNUSABLE NUMERIC DATA ON CLAIMIN  '{abend.field}'",
             file=sys.stderr,
         )
         return 16
