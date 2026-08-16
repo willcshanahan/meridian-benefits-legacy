@@ -2,3 +2,5 @@
 *.so
 *.lst
 build/
+__pycache__/
+*.pyc
