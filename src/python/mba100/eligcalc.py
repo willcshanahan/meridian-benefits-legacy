@@ -81,16 +81,16 @@ class DataAbend(Exception):
 def _display_digits(field: str) -> str:
     """Normalise a COBOL ``PIC 9`` display field to digits.
 
-    An all-blank display field read as zero under the COBOL runtime, so a
-    short or blank record reached ``2100-EDIT-CLAIM`` and was denied rather
-    than killing the run.  Data that is neither blank nor numeric never had
-    defined behaviour, so it abends instead of being guessed at.
+    Blanks in a display field read as zero under the COBOL runtime, so a
+    blank, short or blank-padded record reached ``2100-EDIT-CLAIM`` and was
+    denied rather than killing the run.  Data that is neither blank nor
+    numeric never had defined behaviour, so it abends instead of being
+    guessed at.
     """
-    if field.strip() == "":
-        return "0" * len(field)
-    if not field.isdigit():
+    digits = field.replace(" ", "0")
+    if not digits.isdigit():
         raise DataAbend(field)
-    return field
+    return digits
 
 
 def _display_int(field: str) -> int:
@@ -219,13 +219,19 @@ class EligRecord:
         ).ljust(RECORD_LENGTH)
 
 
+# The COBOL module moved record data around as ``PIC X`` bytes, so any byte
+# value in an alphanumeric field passed straight through.  latin-1 is the
+# byte-transparent codec that reproduces that, on input and on output.
+RECORD_CODEC = "latin-1"
+
+
 class LineSequentialWriter:
     """``ORGANIZATION IS LINE SEQUENTIAL`` output: trailing blanks stripped."""
 
     def __init__(self, path: str, ddname: str) -> None:
         self.ddname = ddname
         try:
-            self._stream = open(path, "w", encoding="ascii", newline="\n")
+            self._stream = open(path, "w", encoding=RECORD_CODEC, newline="\n")
         except OSError as exc:
             raise FileAbend(ddname) from exc
 
@@ -290,7 +296,7 @@ class EligibilityRun:
         # sequential READ did, not held in storage.
         try:
             self._claim_file = open(
-                self._claim_path, "r", encoding="ascii", newline="\n"
+                self._claim_path, "r", encoding=RECORD_CODEC, newline="\n"
             )
         except OSError as exc:
             raise FileAbend("CLAIMIN ") from exc
